@@ -8,7 +8,6 @@ Makefile
 libtool
 ethercat.service
 ethercatctl
-ethercat
 stamp-h1
 .tmp_versions
 Module.symvers
@@ -24,3 +23,7 @@ modules.order
 *.lo
 ec_dc_user_example
 ec_user_example
+
+# == generated files ==
+script/init.d
+tool/ethercat
