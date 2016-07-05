@@ -1211,11 +1211,13 @@ void ec_fsm_master_enter_write_system_times(
 
             EC_SLAVE_DBG(fsm->slave, 1, "Checking system time offset.\n");
 
-            // read DC system time (0x0910, 64 bit)
-            //                         gap (64 bit)
-            //     and time offset (0x0920, 64 bit)
+            //         read DC system time (0x0910, 64 bit)
+            //                                 gap (64 bit)
+            //                 time offset (0x0920, 64 bit)
+	    //                                 gap (64 bit)
+	    //   time loop control bandwith (0x930, 16 bit)
             ec_datagram_fprd(fsm->datagram, fsm->slave->station_address,
-                    0x0910, 24);
+                    0x0910, 34);
             fsm->datagram->device_index = fsm->slave->device_index;
             fsm->retries = EC_FSM_RETRIES;
             fsm->state = ec_fsm_master_state_dc_read_offset;
@@ -1414,6 +1416,7 @@ void ec_fsm_master_state_dc_read_offset(
     ec_datagram_t *datagram = fsm->datagram;
     ec_slave_t *slave = fsm->slave;
     u64 system_time, old_offset, new_offset;
+    u16 time_loop_bandwith;
 #ifdef EC_HAVE_CYCLES
     u64 cycles_since_read;
 #else
@@ -1439,8 +1442,9 @@ void ec_fsm_master_state_dc_read_offset(
         return;
     }
 
-    system_time = EC_READ_U64(datagram->data);     // 0x0910
-    old_offset = EC_READ_U64(datagram->data + 16); // 0x0920
+    system_time = EC_READ_U64(datagram->data);             // 0x0910
+    old_offset = EC_READ_U64(datagram->data + 16);         // 0x0920
+    time_loop_bandwith = EC_READ_U16(datagram->data + 32); // 0x0930
 #ifdef EC_HAVE_CYCLES
     cycles_since_read = get_cycles() - datagram->cycles_sent;
 #else
@@ -1466,9 +1470,13 @@ void ec_fsm_master_state_dc_read_offset(
     }
 
     // set DC system time offset and transmission delay
-    ec_datagram_fpwr(datagram, slave->station_address, 0x0920, 12);
+    ec_datagram_fpwr(datagram, slave->station_address, 0x0920, 18);
     EC_WRITE_U64(datagram->data, new_offset);
     EC_WRITE_U32(datagram->data + 8, slave->transmission_delay);
+    // FIXME: writing non-writable address 0x092c .. 0x092F
+    EC_WRITE_U32(datagram->data + 12, 0);
+    // reset timeloop by writing time loop control bandwith 0x0930
+    EC_WRITE_U16(datagram->data + 16, time_loop_bandwith);
     fsm->datagram->device_index = slave->device_index;
     fsm->retries = EC_FSM_RETRIES;
     fsm->state = ec_fsm_master_state_dc_write_offset;
