@@ -1,8 +1,9 @@
 /******************************************************************************
  *
- *  $Id: fsm_foe.c,v ec403cf308eb 2013/02/12 14:46:43 fp $
+ *  $Id$
  *
  *  Copyright (C) 2008  Olav Zarges, imc Messsysteme GmbH
+ *                2013  Florian Pose <fp@igh-essen.com>
  *
  *  This file is part of the IgH EtherCAT Master.
  *
@@ -27,10 +28,9 @@
  *
  *****************************************************************************/
 
-/**
-   \file
-   EtherCAT FoE state machines.
-*/
+/** \file
+ * EtherCAT FoE state machines.
+ */
 
 /*****************************************************************************/
 
@@ -42,13 +42,10 @@
 
 /*****************************************************************************/
 
-/** Maximum time in ms to wait for responses when reading out the dictionary.
+/** Maximum time in jiffies to wait for responses when reading out the
+ * dictionary.
  */
-#define EC_FSM_FOE_TIMEOUT 3000
-
-/** Mailbox type FoE.
- */
-#define EC_MBOX_TYPE_FILEACCESS 0x04
+#define EC_FSM_FOE_TIMEOUT_JIFFIES (3 * HZ)
 
 /** Size of the FoE header.
  */
@@ -70,7 +67,7 @@ enum {
     EC_FOE_OPCODE_ACK  = 4, /**< Acknowledge. */
     EC_FOE_OPCODE_ERR  = 5, /**< Error. */
     EC_FOE_OPCODE_BUSY = 6  /**< Busy. */
-} ec_foe_opcode_t;
+};
 
 /*****************************************************************************/
 
@@ -209,7 +206,7 @@ void ec_fsm_foe_error(
         )
 {
 #ifdef DEBUG_FOE
-    printk("ec_fsm_foe_error()\n");
+    EC_SLAVE_DBG(fsm->slave, 0, "%s()\n", __func__);
 #endif
 }
 
@@ -223,7 +220,7 @@ void ec_fsm_foe_end(
         )
 {
 #ifdef DEBUG_FOE
-    printk("ec_fsm_foe_end\n");
+    EC_SLAVE_DBG(fsm->slave, 0, "%s()\n", __func__);
 #endif
 }
 
@@ -253,14 +250,17 @@ int ec_foe_prepare_data_send(
     }
 
     data = ec_slave_mbox_prepare_send(fsm->slave,
-            datagram, EC_MBOX_TYPE_FILEACCESS,
-            current_size + EC_FOE_HEADER_SIZE);
+            datagram, EC_MBOX_TYPE_FOE, current_size + EC_FOE_HEADER_SIZE);
     if (IS_ERR(data)) {
         return -1;
     }
 
     EC_WRITE_U16(data, EC_FOE_OPCODE_DATA);    // OpCode = DataBlock req.
     EC_WRITE_U32(data + 2, fsm->tx_packet_no); // PacketNo, Password
+#ifdef DEBUG_FOE
+    EC_SLAVE_DBG(fsm->slave, 0, "sending opcode %u packet %u\n",
+            EC_FOE_OPCODE_DATA, fsm->tx_packet_no);
+#endif
 
     memcpy(data + EC_FOE_HEADER_SIZE,
             fsm->tx_buffer + fsm->tx_buffer_offset, current_size);
@@ -291,13 +291,17 @@ int ec_foe_prepare_wrq_send(
     current_size = fsm->tx_filename_len;
 
     data = ec_slave_mbox_prepare_send(fsm->slave, datagram,
-            EC_MBOX_TYPE_FILEACCESS, current_size + EC_FOE_HEADER_SIZE);
+            EC_MBOX_TYPE_FOE, current_size + EC_FOE_HEADER_SIZE);
     if (IS_ERR(data)) {
         return -1;
     }
 
     EC_WRITE_U16( data, EC_FOE_OPCODE_WRQ); // fsm write request
     EC_WRITE_U32( data + 2, fsm->tx_packet_no );
+#ifdef DEBUG_FOE
+    EC_SLAVE_DBG(fsm->slave, 0, "sending opcode %u packet %u\n",
+            EC_FOE_OPCODE_WRQ, fsm->tx_packet_no);
+#endif
 
     memcpy(data + EC_FOE_HEADER_SIZE, fsm->tx_filename, current_size);
 
@@ -321,7 +325,7 @@ void ec_fsm_foe_write_start(
     fsm->tx_last_packet = 0;
 
 #ifdef DEBUG_FOE
-    printk("ec_fsm_foe_write_start()\n");
+    EC_SLAVE_DBG(fsm->slave, 0, "%s()\n", __func__);
 #endif
 
     if (!(slave->sii.mailbox_protocols & EC_MBOX_FOE)) {
@@ -350,7 +354,7 @@ void ec_fsm_foe_state_ack_check(
     ec_slave_t *slave = fsm->slave;
 
 #ifdef DEBUG_FOE
-    printk("ec_fsm_foe_ack_check()\n");
+    EC_SLAVE_DBG(fsm->slave, 0, "%s()\n", __func__);
 #endif
 
     if (fsm->datagram->state != EC_DATAGRAM_RECEIVED) {
@@ -370,9 +374,8 @@ void ec_fsm_foe_state_ack_check(
 
     if (!ec_slave_mbox_check(fsm->datagram)) {
         // slave did not put anything in the mailbox yet
-        unsigned long diff_ms =
-            (datagram->jiffies_received - fsm->jiffies_start) * 1000 / HZ;
-        if (diff_ms >= EC_FSM_FOE_TIMEOUT) {
+        if (time_after(fsm->datagram->jiffies_received,
+                    fsm->jiffies_start + EC_FSM_FOE_TIMEOUT_JIFFIES)) {
             ec_foe_set_tx_error(fsm, FOE_TIMEOUT_ERROR);
             EC_SLAVE_ERR(slave, "Timeout while waiting for ack response.\n");
             return;
@@ -405,7 +408,7 @@ void ec_fsm_foe_state_ack_read(
     size_t rec_size;
 
 #ifdef DEBUG_FOE
-    printk("ec_fsm_foe_ack_read()\n");
+    EC_SLAVE_DBG(fsm->slave, 0, "%s()\n", __func__);
 #endif
 
     if (fsm->datagram->state != EC_DATAGRAM_RECEIVED) {
@@ -428,7 +431,7 @@ void ec_fsm_foe_state_ack_read(
         return;
     }
 
-    if (mbox_prot != EC_MBOX_TYPE_FILEACCESS) { // FoE
+    if (mbox_prot != EC_MBOX_TYPE_FOE) {
         ec_foe_set_tx_error(fsm, FOE_MBOX_PROT_ERROR);
         EC_SLAVE_ERR(slave, "Received mailbox protocol 0x%02X as response.\n",
                 mbox_prot);
@@ -436,6 +439,9 @@ void ec_fsm_foe_state_ack_read(
     }
 
     opCode = EC_READ_U8(data);
+#ifdef DEBUG_FOE
+    EC_SLAVE_DBG(fsm->slave, 0, "received opcode %u\n", opCode);
+#endif
 
     if (opCode == EC_FOE_OPCODE_BUSY) {
         // slave not ready
@@ -445,6 +451,20 @@ void ec_fsm_foe_state_ack_read(
             return;
         }
         fsm->state = ec_fsm_foe_state_data_sent;
+        return;
+    }
+
+    if (opCode == EC_FOE_OPCODE_ERR) {
+        fsm->request->error_code = EC_READ_U32(data + 2);
+        EC_SLAVE_ERR(slave, "Received FoE Error Request (code 0x%08x).\n",
+                fsm->request->error_code);
+        if (rec_size > 6 && data[6]) {
+            uint8_t text[256];
+            strncpy(text, data + 6, min(rec_size - 6, sizeof(text)));
+            text[sizeof(text)-1] = 0;
+            EC_SLAVE_ERR(slave, "FoE Error Text: %s\n", text);
+        }
+        ec_foe_set_tx_error(fsm, FOE_OPCODE_ERROR);
         return;
     }
 
@@ -482,7 +502,7 @@ void ec_fsm_foe_state_wrq_sent(
     ec_slave_t *slave = fsm->slave;
 
 #ifdef DEBUG_FOE
-    printk("ec_foe_state_sent_wrq()\n");
+    EC_SLAVE_DBG(fsm->slave, 0, "%s()\n", __func__);
 #endif
 
     if (fsm->datagram->state != EC_DATAGRAM_RECEIVED) {
@@ -523,7 +543,7 @@ void ec_fsm_foe_state_data_sent(
     ec_slave_t *slave = fsm->slave;
 
 #ifdef DEBUG_FOE
-    printk("ec_fsm_foe_state_data_sent()\n");
+    EC_SLAVE_DBG(fsm->slave, 0, "%s()\n", __func__);
 #endif
 
     if (fsm->datagram->state != EC_DATAGRAM_RECEIVED) {
@@ -563,7 +583,7 @@ int ec_foe_prepare_rrq_send(
     current_size = fsm->rx_filename_len;
 
     data = ec_slave_mbox_prepare_send(fsm->slave, datagram,
-            EC_MBOX_TYPE_FILEACCESS, current_size + EC_FOE_HEADER_SIZE);
+            EC_MBOX_TYPE_FOE, current_size + EC_FOE_HEADER_SIZE);
     if (IS_ERR(data)) {
         return -1;
     }
@@ -571,6 +591,9 @@ int ec_foe_prepare_rrq_send(
     EC_WRITE_U16(data, EC_FOE_OPCODE_RRQ); // fsm read request
     EC_WRITE_U32(data + 2, 0x00000000); // no passwd
     memcpy(data + EC_FOE_HEADER_SIZE, fsm->rx_filename, current_size);
+#ifdef DEBUG_FOE
+    EC_SLAVE_DBG(fsm->slave, 0, "sending opcode %u\n", EC_FOE_OPCODE_RRQ);
+#endif
 
     if (fsm->slave->master->debug_level) {
         EC_SLAVE_DBG(fsm->slave, 1, "FoE Read Request:\n");
@@ -594,13 +617,17 @@ int ec_foe_prepare_send_ack(
     uint8_t *data;
 
     data = ec_slave_mbox_prepare_send(fsm->slave, datagram,
-            EC_MBOX_TYPE_FILEACCESS, EC_FOE_HEADER_SIZE);
+            EC_MBOX_TYPE_FOE, EC_FOE_HEADER_SIZE);
     if (IS_ERR(data)) {
         return -1;
     }
 
     EC_WRITE_U16(data, EC_FOE_OPCODE_ACK);
     EC_WRITE_U32(data + 2, fsm->rx_expected_packet_no);
+#ifdef DEBUG_FOE
+    EC_SLAVE_DBG(fsm->slave, 0, "sending opcode %u packet %u\n",
+            EC_FOE_OPCODE_ACK, fsm->rx_expected_packet_no);
+#endif
 
     return 0;
 }
@@ -620,7 +647,7 @@ void ec_fsm_foe_state_rrq_sent(
     ec_slave_t *slave = fsm->slave;
 
 #ifdef DEBUG_FOE
-    printk("ec_foe_state_rrq_sent()\n");
+    EC_SLAVE_DBG(fsm->slave, 0, "%s()\n", __func__);
 #endif
 
     if (fsm->datagram->state != EC_DATAGRAM_RECEIVED) {
@@ -662,7 +689,7 @@ void ec_fsm_foe_read_start(
     fsm->rx_last_packet = 0;
 
 #ifdef DEBUG_FOE
-    printk("ec_fsm_foe_read_start()\n");
+    EC_SLAVE_DBG(fsm->slave, 0, "%s()\n", __func__);
 #endif
 
     if (!(slave->sii.mailbox_protocols & EC_MBOX_FOE)) {
@@ -691,7 +718,7 @@ void ec_fsm_foe_state_data_check(
     ec_slave_t *slave = fsm->slave;
 
 #ifdef DEBUG_FOE
-    printk("ec_fsm_foe_state_data_check()\n");
+    EC_SLAVE_DBG(fsm->slave, 0, "%s()\n", __func__);
 #endif
 
     if (fsm->datagram->state != EC_DATAGRAM_RECEIVED) {
@@ -709,10 +736,8 @@ void ec_fsm_foe_state_data_check(
     }
 
     if (!ec_slave_mbox_check(fsm->datagram)) {
-        unsigned long diff_ms =
-            (fsm->datagram->jiffies_received - fsm->jiffies_start) *
-            1000 / HZ;
-        if (diff_ms >= EC_FSM_FOE_TIMEOUT) {
+        if (time_after(fsm->datagram->jiffies_received,
+                    fsm->jiffies_start + EC_FSM_FOE_TIMEOUT_JIFFIES)) {
             ec_foe_set_tx_error(fsm, FOE_TIMEOUT_ERROR);
             EC_SLAVE_ERR(slave, "Timeout while waiting for ack response.\n");
             return;
@@ -728,7 +753,6 @@ void ec_fsm_foe_state_data_check(
 
     fsm->retries = EC_FSM_RETRIES;
     fsm->state = ec_fsm_foe_state_data_read;
-
 }
 
 /*****************************************************************************/
@@ -741,12 +765,13 @@ void ec_fsm_foe_state_data_read(
         )
 {
     size_t rec_size;
-    uint8_t *data, opCode, packet_no, mbox_prot;
+    uint32_t packet_no;
+    uint8_t *data, opCode, mbox_prot;
 
     ec_slave_t *slave = fsm->slave;
 
 #ifdef DEBUG_FOE
-    printk("ec_fsm_foe_state_data_read()\n");
+    EC_SLAVE_DBG(fsm->slave, 0, "%s()\n", __func__);
 #endif
 
     if (fsm->datagram->state != EC_DATAGRAM_RECEIVED) {
@@ -769,7 +794,7 @@ void ec_fsm_foe_state_data_read(
         return;
     }
 
-    if (mbox_prot != EC_MBOX_TYPE_FILEACCESS) { // FoE
+    if (mbox_prot != EC_MBOX_TYPE_FOE) {
         EC_SLAVE_ERR(slave, "Received mailbox protocol 0x%02X as response.\n",
                 mbox_prot);
         ec_foe_set_rx_error(fsm, FOE_PROT_ERROR);
@@ -777,11 +802,21 @@ void ec_fsm_foe_state_data_read(
     }
 
     opCode = EC_READ_U8(data);
+#ifdef DEBUG_FOE
+    EC_SLAVE_DBG(fsm->slave, 0, "received opcode %u\n", opCode);
+#endif
 
     if (opCode == EC_FOE_OPCODE_BUSY) {
+        fsm->rx_expected_packet_no--;
         if (ec_foe_prepare_send_ack(fsm, datagram)) {
             ec_foe_set_rx_error(fsm, FOE_PROT_ERROR);
+        } else {
+            fsm->state = ec_fsm_foe_state_sent_ack;
         }
+#ifdef DEBUG_FOE
+        EC_SLAVE_DBG(fsm->slave, 0, "%s() busy. Next pkt %u\n", __func__,
+                fsm->rx_expected_packet_no);
+#endif
         return;
     }
 
@@ -789,9 +824,10 @@ void ec_fsm_foe_state_data_read(
         fsm->request->error_code = EC_READ_U32(data + 2);
         EC_SLAVE_ERR(slave, "Received FoE Error Request (code 0x%08x).\n",
                 fsm->request->error_code);
-        if (rec_size > 6) {
+        if (rec_size > 6 && data[6]) {
             uint8_t text[256];
             strncpy(text, data + 6, min(rec_size - 6, sizeof(text)));
+            text[sizeof(text)-1] = 0;
             EC_SLAVE_ERR(slave, "FoE Error Text: %s\n", text);
         }
         ec_foe_set_rx_error(fsm, FOE_OPCODE_ERROR);
@@ -806,9 +842,10 @@ void ec_fsm_foe_state_data_read(
         return;
     }
 
-    packet_no = EC_READ_U16(data + 2);
+    packet_no = EC_READ_U32(data + 2);
     if (packet_no != fsm->rx_expected_packet_no) {
-        EC_SLAVE_ERR(slave, "Received unexpected packet number.\n");
+        EC_SLAVE_ERR(slave, "Received packet number %u, expected %u.\n",
+                packet_no, fsm->rx_expected_packet_no);
         ec_foe_set_rx_error(fsm, FOE_PACKETNO_ERROR);
         return;
     }
@@ -832,7 +869,7 @@ void ec_fsm_foe_state_data_read(
         // either it was the last packet or a new packet will fit into the
         // delivered buffer
 #ifdef DEBUG_FOE
-        printk ("last_packet=true\n");
+        EC_SLAVE_DBG(fsm->slave, 0, "last_packet=true\n");
 #endif
         if (ec_foe_prepare_send_ack(fsm, datagram)) {
             ec_foe_set_rx_error(fsm, FOE_RX_DATA_ACK_ERROR);
@@ -844,13 +881,12 @@ void ec_fsm_foe_state_data_read(
     else {
         // no more data fits into the delivered buffer
         // ... wait for new read request
-        printk ("ERROR: data doesn't fit in receive buffer\n");
-        printk ("       rx_buffer_size  = %d\n", fsm->rx_buffer_size);
-        printk ("       rx_buffer_offset= %d\n", fsm->rx_buffer_offset);
-        printk ("       rec_size        = %zd\n", rec_size);
-        printk ("       rx_mailbox_size = %d\n",
-                slave->configured_rx_mailbox_size);
-        printk ("       rx_last_packet  = %d\n", fsm->rx_last_packet);
+        EC_SLAVE_ERR(slave, "Data do not fit in receive buffer!\n");
+        printk("  rx_buffer_size = %d\n", fsm->rx_buffer_size);
+        printk("rx_buffer_offset = %d\n", fsm->rx_buffer_offset);
+        printk("        rec_size = %zd\n", rec_size);
+        printk(" rx_mailbox_size = %d\n", slave->configured_rx_mailbox_size);
+        printk("  rx_last_packet = %d\n", fsm->rx_last_packet);
         fsm->request->result = FOE_READY;
     }
 }
@@ -867,7 +903,7 @@ void ec_fsm_foe_state_sent_ack(
     ec_slave_t *slave = fsm->slave;
 
 #ifdef DEBUG_FOE
-    printk("ec_foe_state_sent_ack()\n");
+    EC_SLAVE_DBG(fsm->slave, 0, "%s()\n", __func__);
 #endif
 
     if (fsm->datagram->state != EC_DATAGRAM_RECEIVED) {

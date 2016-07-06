@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  $Id: voe_handler.c,v ec403cf308eb 2013/02/12 14:46:43 fp $
+ *  $Id$
  *
  *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
@@ -39,10 +39,6 @@
 #include "slave_config.h"
 #include "mailbox.h"
 #include "voe_handler.h"
-
-/** VoE mailbox type.
- */
-#define EC_MBOX_TYPE_VOE 0x0f
 
 /** VoE header size.
  */

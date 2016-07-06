@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  $Id: mailbox.c,v c0b4c64fcebd 2012/12/07 18:51:55 fp $
+ *  $Id$
  *
  *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
@@ -178,6 +178,13 @@ uint8_t *ec_slave_mbox_fetch(const ec_slave_t *slave, /**< slave */
         return ERR_PTR(-EPROTO);
     }
 
+#if 0
+    if (slave->master->debug_level) {
+        EC_SLAVE_DBG(slave, 1, "Mailbox data:\n");
+        ec_print_data(datagram->data, EC_MBOX_HEADER_SIZE + data_size);
+    }
+#endif
+
     *type = EC_READ_U8(datagram->data + 5) & 0x0F;
     *size = data_size;
 
@@ -195,11 +202,13 @@ uint8_t *ec_slave_mbox_fetch(const ec_slave_t *slave, /**< slave */
             break;
         }
 
-        if (!mbox_msg->code)
+        if (!mbox_msg->code) {
             printk("Unknown error reply code 0x%04X.\n", code);
+        }
 
-        if (slave->master->debug_level)
+        if (slave->master->debug_level && data_size > 0) {
             ec_print_data(datagram->data + EC_MBOX_HEADER_SIZE, data_size);
+        }
 
         return ERR_PTR(-EPROTO);
     }

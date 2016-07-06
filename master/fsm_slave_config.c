@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  $Id: fsm_slave_config.c,v 6b21b3f88a9a 2013/02/06 16:25:08 fp $
+ *  $Id$
  *
  *  Copyright (C) 2006-2008  Florian Pose, Ingenieurgemeinschaft IgH
  *
@@ -1129,7 +1129,7 @@ void ec_fsm_slave_config_enter_pdo_sync(
             size = ec_pdo_list_total_size(&sync_config->pdos);
 
             // determine, if PDOs shall be transferred via this SM
-            // inthat case, enable sync manager in every case
+            // in that case, enable sync manager in every case
             for (j = 0; j < sc->used_fmmus; j++) {
                 if (sc->fmmu_configs[j].sync_index == sync_index) {
                     pdo_xfer = 1;
@@ -1399,8 +1399,12 @@ void ec_fsm_slave_config_state_dc_sync_check(
             EC_SLAVE_WARN(slave, "Slave did not sync after %lu ms.\n",
                     diff_ms);
         } else {
-            EC_SLAVE_DBG(slave, 1, "Sync after %4lu ms: %10u ns\n",
-                    diff_ms, abs_sync_diff);
+            static unsigned long last_diff_ms = 0;
+            if ((diff_ms < last_diff_ms) || (diff_ms >= (last_diff_ms + 100))) {
+                last_diff_ms = diff_ms;
+                EC_SLAVE_DBG(slave, 1, "Sync after %4lu ms: %10u ns\n",
+                        diff_ms, abs_sync_diff);
+            }
 
             // check synchrony again
             ec_datagram_fprd(datagram, slave->station_address, 0x092c, 4);
