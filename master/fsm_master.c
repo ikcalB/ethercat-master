@@ -1280,6 +1280,50 @@ u64 ec_fsm_master_dc_offset32(
 
 /*****************************************************************************/
 
+/** Configure 32 bit time offset.
+ *
+ * \return New offset.
+ */
+u64 ec_fsm_master_dc_offset32_cycles(
+        ec_fsm_master_t *fsm, /**< Master state machine. */
+        u64 system_time, /**< System time register. */
+        u64 old_offset, /**< Time offset register. */
+        u64 cycles_since_read /**< Cycles for correction. */
+        )
+{
+    ec_slave_t *slave = fsm->slave;
+    u64 correction;
+    u32 system_time32, old_offset32, new_offset;
+    s32 time_diff;
+
+    system_time32 = (u32) system_time;
+    old_offset32 = (u32) old_offset;
+
+    // correct read system time by elapsed time since read operation
+    correction = cycles_since_read * 1000000ULL;
+    do_div(correction, cpu_khz);
+    system_time32 += (u32) correction;
+    time_diff = (u32) slave->master->app_time - system_time32;
+
+    EC_SLAVE_DBG(slave, 1, "DC 32 bit system time offset calculation:"
+            " system_time=%u (corrected with %u),"
+            " app_time=%llu, diff=%i\n",
+            system_time32, (u32) correction,
+            slave->master->app_time, time_diff);
+
+    if (EC_ABS(time_diff) > EC_SYSTEM_TIME_TOLERANCE_NS) {
+        new_offset = time_diff + old_offset32;
+        EC_SLAVE_DBG(slave, 1, "Setting time offset to %u (was %u)\n",
+                new_offset, old_offset32);
+        return (u64) new_offset;
+    } else {
+        EC_SLAVE_DBG(slave, 1, "Not touching time offset.\n");
+        return old_offset;
+    }
+}
+
+/*****************************************************************************/
+
 /** Configure 64 bit time offset.
  *
  * \return New offset.
@@ -1320,6 +1364,47 @@ u64 ec_fsm_master_dc_offset64(
 
 /*****************************************************************************/
 
+/** Configure 64 bit time offset.
+ *
+ * \return New offset.
+ */
+u64 ec_fsm_master_dc_offset64_cycles(
+        ec_fsm_master_t *fsm, /**< Master state machine. */
+        u64 system_time, /**< System time register. */
+        u64 old_offset, /**< Time offset register. */
+        u64 cycles_since_read /**< Cycles for correction. */
+        )
+{
+    ec_slave_t *slave = fsm->slave;
+    u64 new_offset, correction;
+    s64 time_diff;
+
+    // correct read system time by elapsed time since read operation
+    correction = cycles_since_read * 1000000ULL;
+    do_div(correction, cpu_khz);
+    system_time += correction;
+    time_diff = fsm->slave->master->app_time - system_time;
+
+    EC_SLAVE_DBG(slave, 1, "DC 64 bit system time offset calculation:"
+            " system_time=%llu (corrected with %llu),"
+            " app_time=%llu, diff=%lli\n",
+            system_time, correction,
+            slave->master->app_time, time_diff);
+
+    if (EC_ABS(time_diff) > EC_SYSTEM_TIME_TOLERANCE_NS) {
+        new_offset = time_diff + old_offset;
+        EC_SLAVE_DBG(slave, 1, "Setting time offset to %llu (was %llu)\n",
+                new_offset, old_offset);
+    } else {
+        new_offset = old_offset;
+        EC_SLAVE_DBG(slave, 1, "Not touching time offset.\n");
+    }
+
+    return new_offset;
+}
+
+/*****************************************************************************/
+
 /** Master state: DC READ OFFSET.
  */
 void ec_fsm_master_state_dc_read_offset(
@@ -1329,7 +1414,11 @@ void ec_fsm_master_state_dc_read_offset(
     ec_datagram_t *datagram = fsm->datagram;
     ec_slave_t *slave = fsm->slave;
     u64 system_time, old_offset, new_offset;
+#ifdef EC_HAVE_CYCLES
+    u64 cycles_since_read;
+#else
     unsigned long jiffies_since_read;
+#endif
 
     if (datagram->state == EC_DATAGRAM_TIMED_OUT && fsm->retries--)
         return;
@@ -1352,14 +1441,28 @@ void ec_fsm_master_state_dc_read_offset(
 
     system_time = EC_READ_U64(datagram->data);     // 0x0910
     old_offset = EC_READ_U64(datagram->data + 16); // 0x0920
+#ifdef EC_HAVE_CYCLES
+    cycles_since_read = get_cycles() - datagram->cycles_sent;
+#else
     jiffies_since_read = jiffies - datagram->jiffies_sent;
+#endif
 
     if (slave->base_dc_range == EC_DC_32) {
+#ifdef EC_HAVE_CYCLES
+        new_offset = ec_fsm_master_dc_offset32_cycles(fsm,
+                system_time, old_offset, cycles_since_read);
+#else
         new_offset = ec_fsm_master_dc_offset32(fsm,
                 system_time, old_offset, jiffies_since_read);
+#endif
     } else {
+#ifdef EC_HAVE_CYCLES
+        new_offset = ec_fsm_master_dc_offset64_cycles(fsm,
+                system_time, old_offset, cycles_since_read);
+#else
         new_offset = ec_fsm_master_dc_offset64(fsm,
                 system_time, old_offset, jiffies_since_read);
+#endif
     }
 
     // set DC system time offset and transmission delay
