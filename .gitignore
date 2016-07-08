@@ -14,6 +14,8 @@ ChangeLog
 Doxyfile
 Kbuild
 Makefile
+!documentation/Makefile
+!documentation/**/Makefile
 Makefile.in
 Module.markers
 Module.symvers
@@ -100,8 +102,10 @@ examples/rtai/Kbuild
 examples/rtai/Makefile
 examples/rtai/Makefile.in
 examples/rtai_rtdm/.libs
+examples/rtai_rtdm/.deps
 examples/rtai_rtdm/ec_rtai_rtdm_example
 examples/rtai_rtdm_dc/.libs
+examples/rtai_rtdm_dc/.deps
 examples/rtai_rtdm_dc/ec_rtai_rtdm_dc_example
 examples/user/.deps
 examples/user/.libs
@@ -110,8 +114,10 @@ examples/user/Makefile.in
 examples/user/TAGS
 examples/user/ec_user_example
 examples/xenomai/.libs
+examples/xenomai/.deps
 examples/xenomai/ec_xenomai_example
 examples/xenomai_posix/.libs
+examples/xenomai_posix/.deps
 examples/xenomai_posix/ec_xenomai_posix_example
 include/Makefile
 include/Makefile.in
