@@ -411,16 +411,21 @@ if test "x${enablee1000e}" = "x1"; then
     AC_MSG_RESULT([$kernele1000e])
 
     # check for e1000e file layout (changed in kernel 3.4 and 3.10)
+    # TODO: updated driver (2015) for 3.4 only, update for newer kernels also
     AC_MSG_CHECKING([for e1000e source layout])
 
-    file34="${srcdir}/devices/e1000e/80003es2lan-$kernele1000e-ethercat.c"
+    file34="${srcdir}/devices/e1000e/regs-$kernele1000e-ethercat.h"
+    file36="${srcdir}/devices/e1000e/80003es2lan-$kernele1000e-ethercat.c"
     file310="${srcdir}/devices/e1000e/ptp-$kernele1000e-ethercat.c"
 
-    if test -r "$file310"; then
+    if test -r "$file34"; then
+        AC_MSG_RESULT([== 3.4])
+        e1000elayout=3
+    elif test -r "$file310"; then
         AC_MSG_RESULT([>= 3.10])
         e1000elayout=2
-    elif test -r "$file34"; then
-        AC_MSG_RESULT([>= 3.4])
+    elif test -r "$file36"; then
+        AC_MSG_RESULT([>= 3.6])
         e1000elayout=1
     else
         AC_MSG_RESULT([before 3.4])
